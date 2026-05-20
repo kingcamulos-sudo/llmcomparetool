@@ -1,0 +1,107 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple Silicon
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+            args: '--target aarch64-apple-darwin'
+
+          # Intel Mac
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+            args: '--target x86_64-apple-darwin'
+
+          # Windows
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      # Checkout
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Rust
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            aarch64-apple-darwin
+            x86_64-apple-darwin
+
+      # pnpm
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # Node.js
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      # Dependencies
+      - name: Install frontend dependencies
+        working-directory: app
+        run: pnpm install
+
+      # macOS Intel build fix
+      - name: Setup macOS SDK
+        if: matrix.platform == 'macos-latest'
+        run: |
+          echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> $GITHUB_ENV
+
+      # Build + Release
+      - name: Build Tauri App
+        uses: tauri-apps/tauri-action@v0
+        env:
+          # 推荐：
+          # 如果 GITHUB_TOKEN 还有权限问题
+          # 改成你自己的 PAT:
+          #
+          # GITHUB_TOKEN: ${{ secrets.TAURI_PRIVATE_KEY }}
+          #
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+        with:
+          projectPath: app
+          tauriScript: npx tauri
+
+          tagName: ${{ github.ref_name }}
+
+          releaseName: 'LLM Compare Tool ${{ github.ref_name }}'
+
+          releaseBody: |
+            ## LLM Compare Tool
+
+            Download the correct installer from Assets below.
+
+            ### Platforms
+            - macOS Apple Silicon
+            - macOS Intel
+            - Windows
+
+          releaseDraft: false
+          prerelease: false
+
+          includeUpdaterJson: false
+
+          args: ${{ matrix.args }}

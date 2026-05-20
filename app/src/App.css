@@ -1,0 +1,101 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+    'Hiragino Sans GB', 'Microsoft YaHei', 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  height: 100vh;
+}
+
+/* Light theme overrides */
+.ant-layout-sider {
+  background: #ffffff !important;
+}
+
+.ant-layout-content {
+  background: #f5f5f5 !important;
+}
+
+/* Chat bubble inline code */
+.inline-code {
+  background: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: 'SF Mono', 'Menlo', 'Monaco', 'Consolas', monospace;
+  color: #d63384;
+}
+
+/* Markdown body base */
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.75;
+  color: #333;
+  word-break: break-word;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.markdown-body hr {
+  border: none;
+  border-top: 1px solid #e8e8e8;
+  margin: 12px 0;
+}
+
+/* Typing cursor animation */
+.typing-cursor {
+  display: inline-block;
+  animation: blink 1s step-end infinite;
+  color: #1677ff;
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* Scrollbar for light theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bfbfbf;
+}
+
+/* Card hover effect for light theme */
+.ant-card-inner:hover {
+  border-color: #1677ff;
+  transition: border-color 0.3s;
+}
+
+/* Response area card style */
+.ant-card-type-inner {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+}
