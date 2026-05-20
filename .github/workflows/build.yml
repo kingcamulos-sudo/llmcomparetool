@@ -14,19 +14,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Apple Silicon
+          # macOS Apple Silicon (ARM64)
           - platform: macos-latest
             target: aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
             args: '--target aarch64-apple-darwin'
 
-          # Intel Mac
+          # macOS Intel (x86_64)
           - platform: macos-latest
             target: x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
             args: '--target x86_64-apple-darwin'
 
-          # Windows
+          # Windows x86_64
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            rust_targets: x86_64-pc-windows-msvc
             args: ''
 
     runs-on: ${{ matrix.platform }}
@@ -36,13 +39,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Rust
+      # Rust（仅安装当前平台所需的 target）
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: |
-            aarch64-apple-darwin
-            x86_64-apple-darwin
+          targets: ${{ matrix.rust_targets }}
 
       # pnpm
       - name: Install pnpm
@@ -63,7 +64,7 @@ jobs:
         working-directory: app
         run: pnpm install
 
-      # macOS Intel build fix
+      # macOS SDK（仅 macOS 需要）
       - name: Setup macOS SDK
         if: matrix.platform == 'macos-latest'
         run: |
@@ -73,17 +74,10 @@ jobs:
       - name: Build Tauri App
         uses: tauri-apps/tauri-action@v0
         env:
-          # 推荐：
-          # 如果 GITHUB_TOKEN 还有权限问题
-          # 改成你自己的 PAT:
-          #
-          # GITHUB_TOKEN: ${{ secrets.TAURI_PRIVATE_KEY }}
-          #
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
         with:
           projectPath: app
-          tauriScript: npx tauri
+          tauriScript: pnpm tauri
 
           tagName: ${{ github.ref_name }}
 
@@ -95,9 +89,9 @@ jobs:
             Download the correct installer from Assets below.
 
             ### Platforms
-            - macOS Apple Silicon
-            - macOS Intel
-            - Windows
+            - macOS Apple Silicon (ARM64) → `.dmg` (aarch64)
+            - macOS Intel (x86_64) → `.dmg` (x86_64)
+            - Windows → `.msi` / `.exe`
 
           releaseDraft: false
           prerelease: false
