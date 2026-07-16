@@ -119,7 +119,12 @@ function App() {
   const handleBatchSubmit = useCallback(
     async (questions: string[]) => {
       setIsRunning(true);
-      setLiveResults(new Map());
+      setLiveResults(new Map(
+        questions.map((question, index) => [
+          index,
+          { question, response: '', status: 'streaming' as const },
+        ])
+      ));
       setCompletedResults([]);
       setProgressPercent(0);
 
@@ -135,6 +140,22 @@ function App() {
         );
 
         setCompletedResults(results);
+        // Keep the live view reliable even if an SSE event was missed or streaming is disabled.
+        setLiveResults((prev) => {
+          const next = new Map(prev);
+          results.forEach((result) => {
+            const existing = next.get(result.question_index);
+            next.set(result.question_index, {
+              question: result.question,
+              response: result.full_response || existing?.response || '',
+              status: result.success ? 'done' : 'error',
+              error: result.error || undefined,
+              sourceDocuments: result.source_documents,
+              usedTools: result.used_tools,
+            });
+          });
+          return next;
+        });
 
         const record: RunRecord = {
           id: generateId(),
@@ -148,6 +169,18 @@ function App() {
         setRecords(updatedRecords);
       } catch (err) {
         console.error('Batch failed:', err);
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        setLiveResults((prev) => {
+          const next = new Map(prev);
+          next.forEach((result, index) => {
+            next.set(index, {
+              ...result,
+              status: 'error',
+              error: errorMessage,
+            });
+          });
+          return next;
+        });
       } finally {
         setIsRunning(false);
         setProgressPercent(100);

@@ -2,6 +2,7 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use tauri::Emitter;
+use tauri_plugin_dialog::DialogExt;
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -55,6 +56,37 @@ pub struct QuestionResult {
     pub metadata: Option<serde_json::Value>,
 }
 
+fn headers_for_log(
+    headers: &Option<std::collections::HashMap<String, String>>,
+) -> serde_json::Value {
+    let Some(headers) = headers else {
+        return serde_json::json!({});
+    };
+
+    let sanitized = headers
+        .iter()
+        .map(|(key, value)| {
+            let lower_key = key.to_ascii_lowercase();
+            let is_sensitive = ["authorization", "cookie", "token", "secret", "api-key", "apikey"]
+                .iter()
+                .any(|name| lower_key.contains(name));
+            (key.clone(), if is_sensitive { "***".to_string() } else { value.clone() })
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+
+    serde_json::json!(sanitized)
+}
+
+fn text_for_log(text: &str, max_chars: usize) -> String {
+    let mut chars = text.chars();
+    let preview = chars.by_ref().take(max_chars).collect::<String>();
+    if chars.next().is_some() {
+        format!("{}... [truncated, total {} chars]", preview, text.chars().count())
+    } else {
+        preview
+    }
+}
+
 #[tauri::command]
 pub async fn send_question(
     app: AppHandle,
@@ -65,12 +97,27 @@ pub async fn send_question(
     question_index: usize,
     headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<QuestionResult, String> {
-    let client = reqwest::Client::new();
+    // Internal API addresses must bypass the macOS system proxy. reqwest enables
+    // system proxy discovery by default, which can route private 10.x traffic
+    // through a proxy/VPN and turn an otherwise valid request into a 502.
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|error| format!("Create HTTP client failed: {}", error))?;
     let body = serde_json::json!({
         "question": question,
         "chatId": chat_id,
         "streaming": streaming,
     });
+
+    log::info!("[HTTP][question #{}] POST {}", question_index + 1, api_url);
+    log::info!("[HTTP][question #{}] proxy: disabled (direct connection)", question_index + 1);
+    log::info!(
+        "[HTTP][question #{}] request headers: Content-Type=application/json, accept=text/event-stream, custom={}",
+        question_index + 1,
+        headers_for_log(&headers)
+    );
+    log::info!("[HTTP][question #{}] request body: {}", question_index + 1, body);
 
     let mut req = client
         .post(&api_url)
@@ -85,10 +132,41 @@ pub async fn send_question(
         }
     }
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
+    let response = match req.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            log::error!("[HTTP][question #{}] request failed: {}", question_index + 1, error);
+            return Err(format!("Request failed: {}", error));
+        }
+    };
+
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    log::info!(
+        "[HTTP][question #{}] response: status={}, content-type={}",
+        question_index + 1,
+        status,
+        content_type
+    );
+    if !status.is_success() {
+        let response_body = response.text().await.unwrap_or_default();
+        let detail = response_body.trim();
+        log::error!(
+            "[HTTP][question #{}] error response body: {}",
+            question_index + 1,
+            text_for_log(detail, 4000)
+        );
+        return Err(if detail.is_empty() {
+            format!("HTTP request failed: {}", status)
+        } else {
+            format!("HTTP request failed: {} - {}", status, detail)
+        });
+    }
 
     let timestamp = chrono::Utc::now().to_rfc3339();
 
@@ -97,6 +175,11 @@ pub async fn send_question(
             .text()
             .await
             .map_err(|e| format!("Read response failed: {}", e))?;
+        log::info!(
+            "[HTTP][question #{}] response body: {}",
+            question_index + 1,
+            text_for_log(&text, 4000)
+        );
         let (parsed, sd, ut, md) = parse_non_stream_response(&text);
         let result = QuestionResult {
             question_index,
@@ -155,6 +238,7 @@ pub async fn send_question(
                 }
             }
             Err(e) => {
+                log::error!("[HTTP][question #{}] SSE stream failed: {}", question_index + 1, e);
                 let error_msg = format!("Stream error: {}", e);
                 let result = QuestionResult {
                     question_index, question: question.clone(), full_response: full_response.clone(),
@@ -182,6 +266,11 @@ pub async fn send_question(
         timestamp, success: true, error: None,
         source_documents: source_documents.take(), used_tools: used_tools.take(), metadata: metadata_val.take(),
     };
+    log::info!(
+        "[HTTP][question #{}] SSE completed, response: {}",
+        question_index + 1,
+        text_for_log(&result.full_response, 4000)
+    );
     let _ = app.emit("question-complete", &result);
     Ok(result)
 }
@@ -192,6 +281,11 @@ pub async fn send_questions_batch(
     chat_id: String, streaming: bool,
     headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<Vec<QuestionResult>, String> {
+    log::info!(
+        "[HTTP][batch] starting {} question(s), streaming={}",
+        questions.len(),
+        streaming
+    );
     let mut results = Vec::new();
     for (index, question) in questions.iter().enumerate() {
         let result = send_question(
@@ -207,6 +301,13 @@ pub async fn send_questions_batch(
             }); }
         }
     }
+    let success_count = results.iter().filter(|result| result.success).count();
+    log::info!(
+        "[HTTP][batch] completed: total={}, success={}, failed={}",
+        results.len(),
+        success_count,
+        results.len() - success_count
+    );
     let _ = app.emit("batch-complete", &results);
     Ok(results)
 }
@@ -215,6 +316,39 @@ pub async fn send_questions_batch(
 pub async fn stop_batch(app: AppHandle) -> Result<(), String> {
     let _ = app.emit("batch-stop", ());
     Ok(())
+}
+
+#[tauri::command]
+pub async fn save_excel_file(
+    app: AppHandle,
+    file_name: String,
+    data: Vec<u8>,
+) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .set_title("保存 Excel 文件")
+        .set_file_name(file_name)
+        .add_filter("Excel 工作簿", &["xlsx"])
+        .save_file(move |selected_path| {
+            let _ = sender.send(selected_path);
+        });
+
+    let Some(selected_path) = receiver
+        .await
+        .map_err(|error| format!("Open save dialog failed: {}", error))?
+    else {
+        return Ok(None);
+    };
+    let path = selected_path
+        .into_path()
+        .map_err(|error| format!("Invalid save path: {}", error))?;
+
+    tokio::fs::write(&path, data)
+        .await
+        .map_err(|error| format!("Write Excel file failed: {}", error))?;
+    log::info!("[EXPORT] Excel file saved to {}", path.display());
+    Ok(Some(path.to_string_lossy().into_owned()))
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

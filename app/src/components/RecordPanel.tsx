@@ -1,12 +1,14 @@
 import { useState } from 'react';
-import { Card, Checkbox, Button, Tag, Empty, Space, Typography, List } from 'antd';
+import { Card, Checkbox, Button, Tag, Empty, Space, Typography, List, message } from 'antd';
 import {
   DeleteOutlined,
+  DownloadOutlined,
   SwapOutlined,
   HistoryOutlined,
   ClockCircleOutlined,
 } from '@ant-design/icons';
 import type { RunRecord } from '../types';
+import { exportResultsToExcel } from '../utils/exportExcel';
 
 const { Text } = Typography;
 
@@ -18,6 +20,8 @@ interface Props {
 
 export default function RecordPanel({ records, onDelete, onSelectForCompare }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [exportingId, setExportingId] = useState<string | null>(null);
+  const [messageApi, contextHolder] = message.useMessage();
 
   const toggleSelect = (id: string) => {
     const next = new Set(selectedIds);
@@ -35,8 +39,25 @@ export default function RecordPanel({ records, onDelete, onSelectForCompare }: P
     }
   };
 
+  const handleExport = async (record: RunRecord) => {
+    setExportingId(record.id);
+    try {
+      const savedPath = await exportResultsToExcel(record.results, record.name);
+      if (savedPath) {
+        messageApi.success('历史记录已导出到本地');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      messageApi.error(`导出失败：${errorMessage}`);
+    } finally {
+      setExportingId(null);
+    }
+  };
+
   return (
-    <Card
+    <>
+      {contextHolder}
+      <Card
       size="small"
       title={
         <Space>
@@ -70,6 +91,17 @@ export default function RecordPanel({ records, onDelete, onSelectForCompare }: P
             <List.Item
               style={{ padding: '8px 0' }}
               actions={[
+                <Button
+                  key="export"
+                  size="small"
+                  type="text"
+                  icon={<DownloadOutlined />}
+                  loading={exportingId === record.id}
+                  title="导出该记录的全部结果"
+                  onClick={() => handleExport(record)}
+                >
+                  导出
+                </Button>,
                 <Button
                   key="delete"
                   size="small"
@@ -112,6 +144,7 @@ export default function RecordPanel({ records, onDelete, onSelectForCompare }: P
           )}
         />
       )}
-    </Card>
+      </Card>
+    </>
   );
 }

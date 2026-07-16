@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Tabs, Tag, Button, Empty, Space, Typography, Avatar, Modal } from 'antd';
+import { Tabs, Tag, Button, Empty, Space, Typography, Avatar, Modal, message } from 'antd';
 import {
   PrinterOutlined,
+  DownloadOutlined,
   LoadingOutlined,
   CheckCircleOutlined,
   CloseCircleOutlined,
@@ -13,6 +14,7 @@ import {
   ToolOutlined,
 } from '@ant-design/icons';
 import type { QuestionResult, SourceDocument, UsedTool } from '../types';
+import { exportResultsToExcel } from '../utils/exportExcel';
 import MarkdownRenderer from './MarkdownRenderer';
 
 const { Text } = Typography;
@@ -327,15 +329,18 @@ function ExtraInfoBubbles({
 
 export default function ResponsePanel({ results, allResults }: Props) {
   const [activeTab, setActiveTab] = useState('live');
+  const [messageApi, contextHolder] = message.useMessage();
 
-  const handlePrintAll = () => {
-    const content = allResults
-      .map(
-        (r, i) =>
-          `【问题 ${i + 1}】${r.question}\n【回答】${r.full_response}${r.error ? '\n[错误] ' + r.error : ''}\n${'─'.repeat(40)}`
-      )
-      .join('\n\n');
-    handlePrint(content, '全部问答记录');
+  const handleExportAll = async () => {
+    try {
+      const savedPath = await exportResultsToExcel(allResults);
+      if (savedPath) {
+        messageApi.success('Excel 文件已保存到本地');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      messageApi.error(`导出失败：${errorMessage}`);
+    }
   };
 
   const renderLiveResponses = () => {
@@ -412,6 +417,7 @@ export default function ResponsePanel({ results, allResults }: Props) {
 
   return (
     <div>
+      {contextHolder}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Tabs
           activeKey={activeTab}
@@ -422,7 +428,7 @@ export default function ResponsePanel({ results, allResults }: Props) {
           ]}
         />
         {allResults.length > 0 && (
-          <Button icon={<PrinterOutlined />} onClick={handlePrintAll}>打印全部</Button>
+          <Button icon={<DownloadOutlined />} onClick={handleExportAll}>导出全部</Button>
         )}
       </div>
       {activeTab === 'live' ? renderLiveResponses() : renderAllResponses()}
